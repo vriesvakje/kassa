@@ -30,12 +30,16 @@ function maakInterface() {
   const container = document.createElement('div');
   console.log('Container gemaakt:', container); // Debug-melding
 
+  // Laad opgeslagen positie
+  const savedPosition = JSON.parse(localStorage.getItem('interfacePosition')) || { x: 20, y: 20 };
+  
   container.style.cssText = `
     position: fixed;
-    bottom: 40px;
+    left: ${savedPosition.x}px;
+    top: ${savedPosition.y}px;
     z-index: 9999;
     background-color: #f0f4f8;
-    padding: 20px;
+    padding: 0;
     border-radius: 10px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     max-width: 420px;
@@ -44,30 +48,99 @@ function maakInterface() {
     font-family: Arial, sans-serif;
   `;
 
-  // Bereken de positie naast de menukolom
-  const menuElement = document.querySelector('.left-submenu__list-exclusions');
-  console.log('Menu element gevonden:', menuElement); // Debug-melding
-
-  if (menuElement) {
-    const menuRect = menuElement.getBoundingClientRect();
-    container.style.left = `${menuRect.right + 20}px`;
-  } else {
-    console.log('Menu element niet gevonden, gebruik fallback positie...'); // Debug-melding
-    container.style.left = '20px'; // Fallback positie
-    container.style.bottom = '20px'; // Fallback positie
-  }
+  // Maak een header div die als sleep-handvat dient
+  const header = document.createElement('div');
+  header.style.cssText = `
+    padding: 15px 20px;
+    background-color: #3498db;
+    color: white;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    cursor: grab;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 2px solid #2980b9;
+  `;
 
   const title = document.createElement('h2');
-  title.textContent = 'Kassasysteem Automatisering';
   title.style.cssText = `
-    margin-top: 0;
-    margin-bottom: 15px;
-    color: #2c3e50;
+    margin: 0;
+    color: white;
     font-size: 18px;
-    text-align: center;
   `;
-  container.appendChild(title);
 
+  // Voeg een duidelijkere sleep-indicator toe aan de titel
+  title.innerHTML = '⋮⋮ Kassasysteem Automatisering';
+
+  header.appendChild(title);
+  container.appendChild(header);
+
+  // Content container voor de rest van de interface
+  const contentContainer = document.createElement('div');
+  contentContainer.style.padding = '20px';
+  container.appendChild(contentContainer);
+
+  // Maak de interface versleepbaar
+  let isDragging = false;
+  let currentX;
+  let currentY;
+  let initialX;
+  let initialY;
+
+  function handleDragStart(e) {
+    isDragging = true;
+    initialX = e.clientX - container.offsetLeft;
+    initialY = e.clientY - container.offsetTop;
+    header.style.cursor = 'grabbing';
+  }
+
+  function handleDrag(e) {
+    if (isDragging) {
+      e.preventDefault();
+      currentX = e.clientX - initialX;
+      currentY = e.clientY - initialY;
+      
+      // Zorg dat de interface binnen het scherm blijft
+      const maxX = window.innerWidth - container.offsetWidth;
+      const maxY = window.innerHeight - container.offsetHeight;
+      currentX = Math.min(Math.max(0, currentX), maxX);
+      currentY = Math.min(Math.max(0, currentY), maxY);
+
+      container.style.left = currentX + 'px';
+      container.style.top = currentY + 'px';
+    }
+  }
+
+  function handleDragEnd() {
+    if (isDragging) {
+      isDragging = false;
+      header.style.cursor = 'grab';
+      // Sla de nieuwe positie op
+      localStorage.setItem('interfacePosition', JSON.stringify({
+        x: currentX,
+        y: currentY
+      }));
+    }
+  }
+
+  header.addEventListener('mousedown', handleDragStart);
+  document.addEventListener('mousemove', handleDrag);
+  document.addEventListener('mouseup', handleDragEnd);
+
+  // Cleanup functie voor event listeners
+  function cleanupDragListeners() {
+    header.removeEventListener('mousedown', handleDragStart);
+    document.removeEventListener('mousemove', handleDrag);
+    document.removeEventListener('mouseup', handleDragEnd);
+  }
+
+  // Voeg cleanup toe aan window unload
+  window.addEventListener('unload', cleanupDragListeners);
+
+
+  // Voeg de rest van de interface elementen toe aan de contentContainer in plaats van direct aan de container
   const datumInput = document.createElement('input');
   datumInput.type = 'date';
   datumInput.id = 'datum-selectie';
@@ -137,9 +210,9 @@ function maakInterface() {
   };
 
   // Voeg de knoppen toe aan de container
-  container.appendChild(datumInput);
-  container.appendChild(selectRandomButton);
-  container.appendChild(toggleButton);
+  contentContainer.appendChild(datumInput);
+  contentContainer.appendChild(selectRandomButton);
+  contentContainer.appendChild(toggleButton);
 
   const behandelingenContainer = document.createElement('div');
   behandelingenContainer.style.cssText = `
@@ -171,7 +244,7 @@ function maakInterface() {
     behandelingenContainer.appendChild(button);
   });
 
-  container.appendChild(behandelingenContainer);
+  contentContainer.appendChild(behandelingenContainer);
 
   // Voeg de container toe aan de body
   document.body.appendChild(container);
@@ -226,14 +299,24 @@ document.addEventListener('keydown', function(event) {
 });
 
 window.addEventListener('message', function(event) {
-  if (event.data.type === "DATE_CHANGED") {
-    console.log('Datum succesvol gewijzigd naar:', event.data.date);
-  } else if (event.data.type === "DATE_CHANGE_ERROR") {
-    console.error('Fout bij het wijzigen van de datum:', event.data.error);
-  } else if (event.data.type === "ACTIE_UITGEVOERD") {
-    console.log(event.data.message);
-  } else if (event.data.type === "ACTIE_FOUT") {
-    console.error(event.data.message);
+  if (event.data && event.data.type) {
+    switch (event.data.type) {
+      case "DATE_CHANGED":
+        console.log('Datum succesvol gewijzigd naar:', event.data.date);
+        break;
+      case "DATE_CHANGE_ERROR":
+        console.error('Fout bij het wijzigen van de datum:', event.data.error);
+        break;
+      case "ACTIE_UITGEVOERD":
+        console.log(event.data.message);
+        break;
+      case "ACTIE_FOUT":
+        console.error(event.data.message);
+        break;
+      case "KLANT_SELECTIE_FOUT":
+        console.error('Fout bij klant selectie:', event.data.message);
+        break;
+    }
   }
 });
 
