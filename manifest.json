@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Kassasysteem Automatisering",
+  "version": "1.0",
+  "description": "Automatiseert taken in het online kassasysteem",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://daggebruik.dvisalonsoftware.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://daggebruik.dvisalonsoftware.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["https://daggebruik.dvisalonsoftware.com/*"]
+    }
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "24": "icons/icon24.png",
+      "32": "icons/icon128.png"
+    },
+    "default_title": "Kassasysteem Automatisering"
+  }
+}
