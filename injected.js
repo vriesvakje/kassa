@@ -20,7 +20,7 @@ const SELECTORS = {
 
 // 1. Selecteer een willekeurige klant
 function selectRandomCustomer() {
-  function waitForElement(selector, timeout = 10000) {
+  function waitForElement(selector, timeout = 500) {
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
       const timer = setInterval(() => {
@@ -58,7 +58,7 @@ function selectRandomCustomer() {
     }
   }
 
-  setTimeout(fillCustomerField, 2000);
+  setTimeout(fillCustomerField, 500);
 }
 
 // 2. Datum instellen
