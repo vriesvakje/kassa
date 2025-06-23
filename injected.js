@@ -1,251 +1,175 @@
-// Geïnjecteerd script (injected.js)
+// Geïnjecteerd script (injected.js) - Directe DOM manipulatie voor datum & klant & daily cash save
+// console.log("Injected.js (directe DOM, multi-page date, daily cash save) geladen.");
 
-// Definieer selectors voor knoppen
-const SELECTORS = {
-  DATUM_INPUT: 'input[ng-model="ctrl.dirtyBasket.serviceDateUtc"]',
-  ARTIKELEN_KNOOP: '#checkout-items > div > div:nth-child(1) > button',
-  AFRKENEN_KNOOP: 'li.submenu-item.active > a[ng-click="menuCtrl.goToCheckout()"]',
-  BEHANDELING_KNOOP: '.btn.btn--tile.knippen',
-  KLANT_ZOEK_INPUT: 'input[placeholder="Typ hier om een klant te zoeken."]',
-  DROPDOWN_TOGGLE: '.ui-select-toggle, .dropdown-toggle',
-  SUGGESTIES: '.ui-select-choices-row, .dropdown-item, [role="option"]',
-  BETALEN_KNOOP: 'button.btn.btn-primary.btn-wide.btn-lg.prevent-jumping.checkout-button',
-  PIN_KNOOP: 'button.btn.btn--tile',
-  LAAATSTE_BETAAL_KNOOP: 'button.btn.btn-primary.btn-lg[ng-click="ctrl.goNextAsync(checkoutForm)"]'
+const CHECKOUT_URL_SUFFIX = "/checkout/basket";
+const DAILY_CASH_URL_CONTAINS = "/dailycashbalance/";
+
+const DATE_SELECTORS = {
+  CHECKOUT_DATE_INPUT: 'input[ng-model="ctrl.dirtyBasket.serviceDateUtc"]',
+  DAILY_CASH_DATE_INPUT: 'input[ng-model="ctrl.dailyCashBalanceReport.balanceDateUtc"]',
 };
 
-// ==================================================
-// Functies voor het uitvoeren van acties
-// ==================================================
+const CUSTOMER_SELECTORS = { // Only for checkout page
+  MATCH_CONTAINER: '.ui-select-match-text > span.ng-binding', 
+  TOGGLE: 'span.ui-select-toggle',
+  CHOICES_CONTAINER: 'ul.ui-select-choices',
+};
 
-// 1. Selecteer een willekeurige klant
-function selectRandomCustomer() {
-  function waitForElement(selector, timeout = 10000) {
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-      const timer = setInterval(() => {
-        const element = document.querySelector(selector);
-        if (element) {
-          clearInterval(timer);
-          resolve(element);
-        } else if (Date.now() - startTime > timeout) {
-          clearInterval(timer);
-          reject(new Error(`Timeout waiting for element: ${selector}`));
-        }
-      }, 100);
-    });
-  }
+const DAILY_CASH_SELECTORS = {
+  SAVE_BUTTON: 'button[ng-click="ctrl.save(dailyCashBalanceForm, false)"]',
+};
 
-  async function fillCustomerField() {
-    try {
-      const customerInput = await waitForElement(SELECTORS.KLANT_ZOEK_INPUT);
-      const dropdownToggle = document.querySelector(SELECTORS.DROPDOWN_TOGGLE);
-      if (dropdownToggle) {
-        dropdownToggle.click();
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const suggestions = document.querySelectorAll(SELECTORS.SUGGESTIES);
-        if (suggestions.length > 0) {
-          const randomIndex = Math.floor(Math.random() * suggestions.length);
-          suggestions[randomIndex].click();
-        } else {
-          throw new Error("Geen klantsuggesties gevonden");
-        }
+let customerSelectionAttemptedThisLoad = false; // Specific to checkout page
+
+function waitForElement(selector, timeout = 5000, parent = document) {
+  return new Promise((resolve) => {
+    const intervalTime = 100;
+    let elapsedTime = 0;
+    const timer = setInterval(() => {
+      const element = parent.querySelector(selector);
+      if (element) {
+        clearInterval(timer);
+        resolve(element);
       } else {
-        throw new Error("Dropdown knop niet gevonden");
+        elapsedTime += intervalTime;
+        if (elapsedTime >= timeout) {
+          clearInterval(timer);
+          resolve(null); 
+        }
       }
-    } catch (error) {
-      window.postMessage({ type: "KLANT_SELECTIE_FOUT", message: error.message }, "*");
-    }
-  }
-
-  setTimeout(fillCustomerField, 2000);
+    }, intervalTime);
+  });
 }
 
-// 2. Datum instellen
-function setDate(dateString) {
+async function selectMevrouwCustomer() { /* ... (as before) ... */
+  if (!window.location.pathname.endsWith(CHECKOUT_URL_SUFFIX)) return;
+  if (customerSelectionAttemptedThisLoad) return;
   try {
-    const input = document.querySelector(SELECTORS.DATUM_INPUT);
-    if (input) {
-      const scope = angular.element(input).scope();
-      scope.$apply(() => {
-        const date = new Date(dateString + 'T00:00:00');
-        scope.ctrl.dirtyBasket.serviceDateUtc = date;
-        scope.ctrl.serviceDateChanged();
-      });
-      window.postMessage({ type: "DATE_CHANGED", date: dateString }, "*");
+    const matchContainer = document.querySelector(CUSTOMER_SELECTORS.MATCH_CONTAINER);
+    if (matchContainer && matchContainer.textContent.trim() === "* Mevrouw...") {
+      customerSelectionAttemptedThisLoad = true; return;
+    }
+    const toggle = await waitForElement(CUSTOMER_SELECTORS.TOGGLE);
+    if (!toggle) { customerSelectionAttemptedThisLoad = true; return; }
+    toggle.click(); 
+    const choicesContainer = await waitForElement(CUSTOMER_SELECTORS.CHOICES_CONTAINER);
+    if (!choicesContainer) { customerSelectionAttemptedThisLoad = true; return; }
+    await new Promise(resolve => setTimeout(resolve, 700));
+    const targetText = "* Mevrouw...";
+    let mevrouwOptionElement = null;
+    const choiceElements = choicesContainer.querySelectorAll('li div[ng-bind-html], li span[ng-bind-html], div[role="option"] span');
+    for (const el of choiceElements) {
+      if (el.textContent && el.textContent.trim() === targetText) {
+        mevrouwOptionElement = el; break;
+      }
+    }
+    if (mevrouwOptionElement) mevrouwOptionElement.click();
+    else if (document.querySelector('.ui-select-container.open')) toggle.click();
+  } catch (error) { console.error("Injected.js: Fout bij selecteren Mevrouw klant:", error);
+  } finally { customerSelectionAttemptedThisLoad = true; }
+}
+
+async function clickDailyCashSaveButton() {
+  let success = false;
+  let errorMessage = "";
+  if (!window.location.pathname.includes(DAILY_CASH_URL_CONTAINS)) {
+    errorMessage = "Niet op de dailycashbalance pagina.";
+    // console.warn("Injected.js: " + errorMessage);
+    window.postMessage({ type: "DAILY_CASH_SAVE_STATUS", success: false, error: errorMessage }, "*");
+    return;
+  }
+
+  try {
+    const saveButton = await waitForElement(DAILY_CASH_SELECTORS.SAVE_BUTTON);
+    if (saveButton) {
+      if (!saveButton.disabled) {
+        saveButton.click();
+        // console.log("Injected.js: 'Opslaan' knop geklikt op dailycashbalance pagina.");
+        success = true;
+      } else {
+        errorMessage = "'Opslaan' knop is uitgeschakeld.";
+        // console.warn("Injected.js: " + errorMessage);
+      }
     } else {
-      throw new Error('Datum input veld niet gevonden');
+      errorMessage = "'Opslaan' knop niet gevonden op dailycashbalance pagina.";
+      // console.warn("Injected.js: " + errorMessage);
     }
   } catch (error) {
-    window.postMessage({ type: "DATE_CHANGE_ERROR", error: error.message }, "*");
+    errorMessage = error.message;
+    console.error("Injected.js: Fout bij klikken op 'Opslaan' knop:", error);
   }
+  window.postMessage({ type: "DAILY_CASH_SAVE_STATUS", success: success, error: errorMessage }, "*");
 }
 
-// 3. Klik op Artikelen knop
-function klikOpArtikelenKnop() {
-  const knop = document.querySelector(SELECTORS.ARTIKELEN_KNOOP);
-  if (knop) {
-    knop.click();
-    window.postMessage({ type: "ACTIE_UITGEVOERD", message: 'Geklikt op de Artikelen knop' }, "*");
-  } else {
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Artikelen knop niet gevonden' }, "*");
-  }
-}
+function setDateOnPage(dateString) { /* ... (as before) ... */
+  let success = false;
+  let errorMessage = "";
+  let dateInputSelector = null;
+  let pageType = null;
 
-// 4. Klik op Behandeling knop
-function klikOpBehandelingsKnop(index) {
-  const behandelingen = [
-    { naam: "Föhnen normaal", prijs: "25,00" },
-    { naam: "ponny", prijs: "15,00" },
-    { naam: "knippen klijn", prijs: "35,00" },
-    { naam: "knippen groot", prijs: "31,00" },
-    { naam: "behandeling", prijs: "70,00" },
-    { naam: "uitgroei kleuren", prijs: "80,00" },
-    { naam: "knipen kleuren kort", prijs: "87,50" },
-    { naam: "kleuren drogen", prijs: "90,00" },
-    { naam: "prijs groot", prijs: "95,00" },
-    { naam: "knippen kleuren", prijs: "105,00" }
-  ];
-
-  const behandeling = behandelingen[index];
-  const knoppen = document.querySelectorAll(SELECTORS.BEHANDELING_KNOOP);
-
-  for (let knop of knoppen) {
-    if (knop.textContent.trim().toLowerCase().startsWith(behandeling.naam.toLowerCase())) {
-      knop.click();
-      window.postMessage({ type: "ACTIE_UITGEVOERD", message: `Geklikt op behandeling: ${behandeling.naam}` }, "*");
-      return;
-    }
+  if (window.location.pathname.endsWith(CHECKOUT_URL_SUFFIX)) {
+    dateInputSelector = DATE_SELECTORS.CHECKOUT_DATE_INPUT;
+    pageType = "checkout";
+  } else if (window.location.pathname.includes(DAILY_CASH_URL_CONTAINS)) {
+    dateInputSelector = DATE_SELECTORS.DAILY_CASH_DATE_INPUT;
+    pageType = "dailyCash";
   }
 
-  window.postMessage({ type: "ACTIE_FOUT", message: `Knop voor behandeling ${behandeling.naam} niet gevonden` }, "*");
-}
-
-// 5. Klik op Betalen knop
-function klikOpBetalenKnop() {
-  const betalenKnop = document.querySelector(SELECTORS.BETALEN_KNOOP);
-  if (betalenKnop) {
-    betalenKnop.click();
-    window.postMessage({ type: "ACTIE_UITGEVOERD", message: 'Geklikt op de Betalen knop' }, "*");
-    wachtOpPinPagina();
-  } else {
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Betalen knop niet gevonden' }, "*");
+  if (!dateInputSelector) {
+    window.postMessage({ type: "DATE_SET_STATUS", success: false, date: dateString, error: "Niet op ondersteunde pagina" }, "*");
+    return;
   }
+
+  try {
+    const inputElement = document.querySelector(dateInputSelector);
+    if (inputElement) {
+      const scope = angular.element(inputElement).scope();
+      if (scope && scope.ctrl) {
+        const newDate = new Date(dateString + 'T00:00:00');
+        let dateChanged = false;
+        if (pageType === "checkout" && scope.ctrl.dirtyBasket && typeof scope.ctrl.serviceDateChanged === 'function') {
+          const currentDateInScope = scope.ctrl.dirtyBasket.serviceDateUtc;
+          if (!currentDateInScope || newDate.getTime() !== new Date(currentDateInScope.toDateString()).getTime()) {
+            scope.ctrl.dirtyBasket.serviceDateUtc = newDate;
+            scope.ctrl.serviceDateChanged();
+            dateChanged = true;
+          }
+        } else if (pageType === "dailyCash" && scope.ctrl.dailyCashBalanceReport) {
+          const currentDateInScope = scope.ctrl.dailyCashBalanceReport.balanceDateUtc;
+           if (!currentDateInScope || newDate.getTime() !== new Date(currentDateInScope.toDateString()).getTime()) {
+            scope.ctrl.dailyCashBalanceReport.balanceDateUtc = newDate;
+            if (typeof scope.ctrl.changeDay === 'function') scope.ctrl.changeDay();
+            dateChanged = true;
+          }
+        } else { errorMessage = `Angular scope structuur niet herkend voor pagina type: ${pageType}`; }
+        if (dateChanged) success = true;
+        else if (!errorMessage) success = true;
+      } else { errorMessage = "Angular scope of ctrl object niet gevonden."; }
+    } else { errorMessage = `Datum input veld niet gevonden: ${dateInputSelector}`; }
+  } catch (error) { errorMessage = error.message; console.error('Injected.js: Fout bij het wijzigen van de datum:', error); }
+  window.postMessage({ type: "DATE_SET_STATUS", success: success, date: dateString, error: errorMessage }, "*");
 }
-
-// 6. Wacht op Pin pagina
-function wachtOpPinPagina() {
-  const maxPogingen = 20;
-  let pogingen = 0;
-
-  const controleerPinPagina = setInterval(() => {
-    pogingen++;
-    if (document.URL.includes("/checkout")) {
-      clearInterval(controleerPinPagina);
-      setTimeout(klikOpPinKnop, 500);
-    } else if (pogingen >= maxPogingen) {
-      clearInterval(controleerPinPagina);
-      window.postMessage({ type: "ACTIE_FOUT", message: 'Timeout bij wachten op Pin pagina' }, "*");
-    }
-  }, 1000);
-}
-
-// 7. Klik op Pin knop
-function klikOpPinKnop() {
-  const pinKnoppen = Array.from(document.querySelectorAll(SELECTORS.PIN_KNOOP)).filter(btn => btn.textContent.trim() === 'Pin');
-  if (pinKnoppen.length > 0) {
-    const pinKnop = pinKnoppen[0];
-    if (!pinKnop.disabled) {
-      pinKnop.click();
-      window.postMessage({ type: "ACTIE_UITGEVOERD", message: 'Geklikt op de Pin knop' }, "*");
-      setTimeout(klikOpLaatsteBetaalKnop, 250);
-    } else {
-      window.postMessage({ type: "ACTIE_FOUT", message: 'Pin knop is uitgeschakeld' }, "*");
-    }
-  } else {
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Pin knop niet gevonden' }, "*");
-  }
-}
-
-// 8. Klik op Laatste Betalen knop
-function klikOpLaatsteBetaalKnop() {
-  const laatsteBetaalKnop = document.querySelector(SELECTORS.LAAATSTE_BETAAL_KNOOP);
-  if (laatsteBetaalKnop && !laatsteBetaalKnop.disabled) {
-    laatsteBetaalKnop.click();
-    window.postMessage({ type: "ACTIE_UITGEVOERD", message: 'Geklikt op de laatste Betalen knop' }, "*");
-    setTimeout(klikOpAfrekenenKnop, 1000);
-  } else if (laatsteBetaalKnop && laatsteBetaalKnop.disabled) {
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Laatste Betalen knop is uitgeschakeld' }, "*");
-  } else {
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Laatste Betalen knop niet gevonden' }, "*");
-  }
-}
-
-function klikOpAfrekenenKnop() {
-  const afrekenenKnop = document.querySelector(SELECTORS.AFRKENEN_KNOOP);
-  if (afrekenenKnop) {
-    console.log("Afrekenen knop gevonden, klikken...");
-    afrekenenKnop.click();
-    window.postMessage({ type: "ACTIE_UITGEVOERD", message: 'Geklikt op de Afrekenen knop' }, "*");
-    
-    // Start het proces opnieuw na het klikken op de Afrekenen knop
-    setTimeout(() => {
-      console.log("Opnieuw een klant selecteren...");
-      selectRandomCustomer();
-    }, 2000);
-  } else {
-    console.warn("Afrekenen knop niet gevonden");
-    window.postMessage({ type: "ACTIE_FOUT", message: 'Afrekenen knop niet gevonden' }, "*");
-  }
-}
-
-// ==================================================
-// Berichtafhandeling
-// ==================================================
 
 function handleMessage(event) {
-  if (event.data && event.data.type) {
-    console.log("Bericht ontvangen:", event.data);
+  if (event.source !== window || !event.data || !event.data.type) return;
+  // console.log("Injected.js: Bericht ontvangen:", event.data.type, event.data);
 
-    switch (event.data.type) {
-      case "CHANGE_DATE":
-        console.log("Datum wijzigen naar:", event.data.date);
-        setDate(event.data.date);
-        break;
-      case "KLIK_ARTIKELEN":
-        console.log("KLIK_ARTIKELEN ontvangen, starten...");
-        klikOpArtikelenKnop();
-        break;
-      case "KLIK_BEHANDELING":
-        console.log("KLIK_BEHANDELING ontvangen, behandeling index:", event.data.index);
-        klikOpBehandelingsKnop(event.data.index);
-        if (!event.data.isAfwijkendBedragAan) {
-          console.log("Afwijkend bedrag is uit, doorgaan met betalen...");
-          setTimeout(klikOpBetalenKnop, 1000);
-        } else {
-          console.log("Afwijkend bedrag is aan, stop na behandeling.");
-        }
-        break;
-      case "SELECT_RANDOM_CUSTOMER":
-        console.log("SELECT_RANDOM_CUSTOMER ontvangen, starten...");
-        selectRandomCustomer();
-        break;
-      default:
-        console.warn("Onbekend berichttype:", event.data.type);
-    }
-  } else {
-    console.warn("Ontvangen bericht heeft geen type:", event.data);
+  switch (event.data.type) {
+    case "CHANGE_DATE":
+      if (typeof event.data.date === 'string') setDateOnPage(event.data.date);
+      else window.postMessage({ type: "DATE_SET_STATUS", success: false, date: null, error: "Ongeldige datum formaat" }, "*");
+      break;
+    case "SETUP_CHECKOUT_PAGE": 
+      if (window.location.pathname.endsWith(CHECKOUT_URL_SUFFIX)) selectMevrouwCustomer();
+      break;
+    case "RESET_PAGE_STATE": 
+      customerSelectionAttemptedThisLoad = false;
+      break;
+    case "CLICK_DAILY_CASH_SAVE":
+      clickDailyCashSaveButton();
+      break;
+    default:
+      break;
   }
 }
-
-// ==================================================
-// Initialisatie
-// ==================================================
-
-window.addEventListener('message', handleMessage);
-
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-  selectRandomCustomer();
-} else {
-  window.addEventListener('load', selectRandomCustomer);
-}
+window.addEventListener('message', handleMessage, false);
